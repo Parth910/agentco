@@ -17,6 +17,7 @@ Commands:
   stop       Stop all services
   status     Show services, Ollama and LLM status
   logs       Follow service logs (Ctrl+C to exit)
+  llm-test   Check the LLM works (chat + structured output)
   help       Show this help
 
 Coming later:
@@ -39,7 +40,7 @@ api_port() {
 
 cmd_start() {
   require_env
-  docker compose up -d --wait
+  docker compose up -d --build --wait
   green "✔ AgentCo running → http://localhost:$(api_port)/health"
 }
 
@@ -80,6 +81,12 @@ cmd_logs() {
   docker compose logs -f
 }
 
+cmd_llm_test() {
+  require_env
+  [ -n "$(docker compose ps -q api)" ] || { red "✘ Services not running. Start them with: make start"; exit 1; }
+  docker compose exec api python -m agentco.llm.smoke
+}
+
 not_yet() {
   yellow "'$1' is not available yet (planned for $2). See the Roadmap in README.md."
   exit 1
@@ -90,6 +97,7 @@ case "${1:-help}" in
   stop)     cmd_stop ;;
   status)   cmd_status ;;
   logs)     cmd_logs ;;
+  llm-test) cmd_llm_test ;;
   launch)   not_yet launch M5 ;;
   projects) not_yet projects M10 ;;
   resume)   not_yet resume M10 ;;
