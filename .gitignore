@@ -1,0 +1,35 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+dist/
+build/
+
+# Node (dashboard)
+node_modules/
+.next/
+
+# Environment / secrets
+.env
+.env.*
+!.env.example
+
+# Runtime data (created when the app runs)
+data/
+projects/*
+!projects/README.md
+*.db
+*.sqlite
+*.log
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
