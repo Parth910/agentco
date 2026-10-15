@@ -7,8 +7,9 @@ engineers, QA, …), and watch them research, write a PRD, plan tickets, write c
 test it — all through an internal workspace (task board, docs, chat, git repo) that
 runs on your own machine. Every step is observable.
 
-> **Status: early development (M0).** This README describes the target experience.
-> See the [Roadmap](#roadmap) for what works today.
+> **Status: early development (M1).** This README describes the target experience.
+> Today, `./setup.sh` prepares your machine and starts the API, and `./agentco status`
+> checks that everything (including the LLM) is reachable. See the [Roadmap](#roadmap).
 
 This is a learning project for core agentic AI concepts: agent loops, tool calling,
 multi-agent coordination, role permissions, shared state, human-in-the-loop and
@@ -67,7 +68,8 @@ cd agentco
 ```
 
 `setup.sh` checks Docker and Ollama, picks a model for your RAM, pulls it, and starts
-all services:
+all services. Use `./setup.sh --model <name>` to choose a model yourself, or `--yes` to
+skip prompts:
 
 ```
 ✔ Docker running
@@ -209,8 +211,8 @@ agentco/
 
 | # | Milestone | Outcome | Status |
 |---|---|---|---|
-| M0 | Foundation | Repo, README, structure | 🚧 |
-| M1 | Setup & infra | `./setup.sh` gets a machine ready | ⬜ |
+| M0 | Foundation | Repo, README, structure | ✅ |
+| M1 | Setup & infra | `./setup.sh` gets a machine ready | ✅ |
 | M2 | LLM client | Talks to Ollama or any OpenAI-compatible API | ⬜ |
 | M3 | Workspace | Board, docs, chat APIs — **v0.1.0** | ⬜ |
 | M4 | Tools & permissions | Agents can use workspace tools, scoped by role | ⬜ |
