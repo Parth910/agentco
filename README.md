@@ -7,10 +7,10 @@ engineers, QA, …), and watch them research, write a PRD, plan tickets, write c
 test it — all through an internal workspace (task board, docs, chat, git repo) that
 runs on your own machine. Every step is observable.
 
-> **Status: early development (M2).** This README describes the target experience.
-> Today, `make setup` prepares your machine and starts the API, `make status` checks
-> everything is reachable, and `make llm-test` runs a real chat + structured-output
-> call against your local model. See the [Roadmap](#roadmap).
+> **Status: early development (M3).** This README describes the target experience.
+> Today: `make setup` prepares your machine, `make llm-test` runs a real call against
+> your local model, and the [workspace API](#workspace-api) (board, docs, chat) is live
+> at http://localhost:8000/docs. Agents arrive in M5. See the [Roadmap](#roadmap).
 
 This is a learning project for core agentic AI concepts: agent loops, tool calling,
 multi-agent coordination, role permissions, shared state, human-in-the-loop and
@@ -187,6 +187,37 @@ Models can also be set per role, e.g. a local model for most roles and a stronge
 
 ---
 
+## Workspace API
+
+The workspace is where agents (and you) work. Everything is grouped by **project**;
+data is stored in SQLite at `data/agentco.db` and survives restarts.
+Interactive docs: **http://localhost:8000/docs**
+
+| Area | Endpoints |
+|---|---|
+| Projects | `POST /projects` · `GET /projects` · `GET /projects/{id}` |
+| Board | `POST/GET /projects/{id}/tickets` (filter `?status=` `?assignee=`) · `GET/PATCH …/tickets/{n}` · `POST/GET …/tickets/{n}/comments` |
+| Docs | `PUT /projects/{id}/docs/{slug}` (create or new version) · `GET …/docs` · `GET …/docs/{slug}` · `GET …/docs/{slug}/versions[/{v}]` |
+| Chat | `POST/GET /projects/{id}/channels/{channel}/messages` · `GET …/channels` · `GET /projects/{id}/messages?mention=qa` (a role's inbox) |
+
+```bash
+# create a project, a ticket, and move it
+curl -X POST localhost:8000/projects -H 'content-type: application/json' \
+  -d '{"name": "Social feed", "idea": "Feed for college students"}'
+curl -X POST localhost:8000/projects/1/tickets -H 'content-type: application/json' \
+  -d '{"title": "Create posts API", "assignee": "engineer_1", "priority": 1}'
+curl -X PATCH localhost:8000/projects/1/tickets/1 -H 'content-type: application/json' \
+  -d '{"status": "in_progress"}'
+
+# post in chat; @mentions are detected automatically
+curl -X POST localhost:8000/projects/1/channels/eng/messages -H 'content-type: application/json' \
+  -d '{"author": "engineer_1", "body": "Started ticket 1, @qa review soon"}'
+```
+
+Ticket statuses: `todo → in_progress → review → done`. Priority: 1 (highest) to 3.
+
+---
+
 ## Design notes for local models
 
 Small local models are much weaker than frontier APIs, so the system is built around that:
@@ -208,7 +239,7 @@ Small local models are much weaker than frontier APIs, so the system is built ar
 agentco/
 ├── src/agentco/        # Python package
 │   ├── llm/            # OpenAI-compatible LLM client
-│   ├── workspace/      # Board, docs, chat (SQLite + API)
+│   ├── workspace/      # Board, docs, chat: models, service (logic), api (HTTP)
 │   ├── tools/          # Workspace APIs exposed as agent tools + permissions
 │   ├── agents/         # Agent loop and roles
 │   ├── orchestrator/   # Team workflow (LangGraph)
@@ -230,7 +261,7 @@ agentco/
 | M0 | Foundation | Repo, README, structure | ✅ |
 | M1 | Setup & infra | `make setup` gets a machine ready | ✅ |
 | M2 | LLM client | Talks to Ollama or any OpenAI-compatible API | ✅ |
-| M3 | Workspace | Board, docs, chat APIs — **v0.1.0** | ⬜ |
+| M3 | Workspace | Board, docs, chat APIs — **v0.1.0** | ✅ |
 | M4 | Tools & permissions | Agents can use workspace tools, scoped by role | ⬜ |
 | M5 | First agent (PM) | Idea → PRD + tickets — **v0.2.0** | ⬜ |
 | M6 | Team workflow | PM → Engineer → QA end to end — **v0.3.0** | ⬜ |
@@ -238,6 +269,7 @@ agentco/
 | M8 | Dashboard | Watch the team live — **v0.4.0** | ⬜ |
 | M9 | Config & control | Team YAML, live edits, approvals | ⬜ |
 | M10 | Polish | Export, resume, docs — **v1.0.0** | ⬜ |
+| Later | CI | GitHub Actions runs `make test` on every PR | ⬜ |
 
 ## Contributing
 
