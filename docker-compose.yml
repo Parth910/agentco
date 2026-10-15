@@ -1,0 +1,20 @@
+# AgentCo services. Ollama runs on the host (not here) so it can use the GPU.
+# Langfuse (M7) and the dashboard (M8) are added later.
+
+services:
+  api:
+    build: .
+    env_file: .env
+    ports:
+      - "${WORKSPACE_API_PORT:-8000}:8000"
+    extra_hosts:
+      # Lets Linux containers reach Ollama on the host (Docker Desktop has this built in).
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./data:/app/data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    restart: unless-stopped
