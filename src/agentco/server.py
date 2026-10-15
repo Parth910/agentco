@@ -1,14 +1,17 @@
-"""AgentCo API server. For now it only exposes a health check; the workspace
-APIs (board, docs, chat) are added in M3."""
+"""AgentCo API server: health check + workspace APIs (projects, board, docs, chat)."""
 
 import os
+from contextlib import asynccontextmanager
 
 import httpx
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
+from sqlalchemy import Engine
 
 from agentco import __version__
-
-app = FastAPI(title="AgentCo", version=__version__)
+from agentco.workspace.api import router as workspace_router
+from agentco.workspace.db import init_db, make_engine
+from agentco.workspace.service import NotFoundError
 
 
 async def check_llm() -> dict:
@@ -35,8 +38,27 @@ async def check_llm() -> dict:
     }
 
 
-@app.get("/health")
-async def health() -> dict:
-    # The service is healthy if it is up; LLM status is reported but does not
-    # fail the check, so the stack still starts while a model is downloading.
-    return {"status": "ok", "version": __version__, "llm": await check_llm()}
+def create_app(engine: Engine | None = None) -> FastAPI:
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        app.state.engine = engine or make_engine()
+        init_db(app.state.engine)
+        yield
+
+    app = FastAPI(title="AgentCo", version=__version__, lifespan=lifespan)
+    app.include_router(workspace_router)
+
+    @app.exception_handler(NotFoundError)
+    async def not_found(_request: Request, exc: NotFoundError) -> JSONResponse:
+        return JSONResponse(status_code=404, content={"detail": str(exc)})
+
+    @app.get("/health", tags=["system"])
+    async def health() -> dict:
+        # The service is healthy if it is up; LLM status is reported but does not
+        # fail the check, so the stack still starts while a model is downloading.
+        return {"status": "ok", "version": __version__, "llm": await check_llm()}
+
+    return app
+
+
+app = create_app()
