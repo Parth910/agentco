@@ -9,6 +9,9 @@ from agentco.workspace import service
 from agentco.workspace.models import (
     Comment,
     CommentCreate,
+    Doc,
+    DocVersion,
+    DocWrite,
     Project,
     ProjectCreate,
     Ticket,
@@ -84,3 +87,33 @@ def add_comment(
 @router.get("/{project_id}/tickets/{number}/comments", tags=["board"])
 def list_comments(project_id: int, number: int, session: Session = SessionDep) -> list[Comment]:
     return service.list_comments(session, project_id, number)
+
+
+# --- docs --------------------------------------------------------------------
+
+@router.put("/{project_id}/docs/{slug}", tags=["docs"])
+def write_doc(project_id: int, slug: str, data: DocWrite, session: Session = SessionDep) -> Doc:
+    """Create or update a doc. Each change is saved as a new version."""
+    return service.write_doc(session, project_id, slug, data)
+
+
+@router.get("/{project_id}/docs", tags=["docs"])
+def list_docs(project_id: int, session: Session = SessionDep) -> list[Doc]:
+    return service.list_docs(session, project_id)
+
+
+@router.get("/{project_id}/docs/{slug}", tags=["docs"])
+def get_doc(project_id: int, slug: str, session: Session = SessionDep) -> Doc:
+    return service.get_doc(session, project_id, slug)
+
+
+@router.get("/{project_id}/docs/{slug}/versions", tags=["docs"])
+def list_doc_versions(project_id: int, slug: str, session: Session = SessionDep) -> list[DocVersion]:
+    return service.list_doc_versions(session, project_id, slug)
+
+
+@router.get("/{project_id}/docs/{slug}/versions/{version}", tags=["docs"])
+def get_doc_version(
+    project_id: int, slug: str, version: int, session: Session = SessionDep
+) -> DocVersion:
+    return service.get_doc_version(session, project_id, slug, version)

@@ -1,10 +1,15 @@
 """Workspace logic. Used by the HTTP API and (from M4) directly by agent tools."""
 
+import re
+
 from sqlmodel import Session, func, select
 
 from agentco.workspace.models import (
     Comment,
     CommentCreate,
+    Doc,
+    DocVersion,
+    DocWrite,
     Project,
     ProjectCreate,
     Ticket,
@@ -17,6 +22,13 @@ from agentco.workspace.models import (
 
 class NotFoundError(Exception):
     pass
+
+
+class InvalidError(Exception):
+    """The request is well-formed but not allowed (e.g. a bad doc slug)."""
+
+
+SLUG_PATTERN = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
 
 
 # --- projects ----------------------------------------------------------------
@@ -104,3 +116,58 @@ def add_comment(session: Session, project_id: int, number: int, data: CommentCre
 def list_comments(session: Session, project_id: int, number: int) -> list[Comment]:
     ticket = get_ticket(session, project_id, number)
     return list(session.exec(select(Comment).where(Comment.ticket_id == ticket.id).order_by(Comment.id)))
+
+
+# --- docs --------------------------------------------------------------------
+
+def write_doc(session: Session, project_id: int, slug: str, data: DocWrite) -> Doc:
+    """Create the doc, or update it as a new version. Unchanged writes add no version."""
+    if not SLUG_PATTERN.match(slug):
+        raise InvalidError(f"Invalid doc slug '{slug}': use lowercase letters, digits and dashes")
+    get_project(session, project_id)
+
+    doc = session.exec(select(Doc).where(Doc.project_id == project_id, Doc.slug == slug)).first()
+    if doc is None:
+        doc = Doc.model_validate(data, update={"project_id": project_id, "slug": slug})
+    elif (doc.title, doc.content) == (data.title, data.content):
+        return doc
+    else:
+        doc.sqlmodel_update(data.model_dump())
+        doc.version += 1
+        doc.updated_at = utcnow()
+
+    session.add(doc)
+    session.flush()  # assigns doc.id for a new doc
+    session.add(DocVersion.model_validate(data, update={"doc_id": doc.id, "version": doc.version}))
+    session.commit()
+    session.refresh(doc)
+    return doc
+
+
+def list_docs(session: Session, project_id: int) -> list[Doc]:
+    get_project(session, project_id)
+    return list(session.exec(select(Doc).where(Doc.project_id == project_id).order_by(Doc.slug)))
+
+
+def get_doc(session: Session, project_id: int, slug: str) -> Doc:
+    doc = session.exec(select(Doc).where(Doc.project_id == project_id, Doc.slug == slug)).first()
+    if not doc:
+        raise NotFoundError(f"Doc '{slug}' not found in project {project_id}")
+    return doc
+
+
+def list_doc_versions(session: Session, project_id: int, slug: str) -> list[DocVersion]:
+    doc = get_doc(session, project_id, slug)
+    return list(
+        session.exec(select(DocVersion).where(DocVersion.doc_id == doc.id).order_by(DocVersion.version))
+    )
+
+
+def get_doc_version(session: Session, project_id: int, slug: str, version: int) -> DocVersion:
+    doc = get_doc(session, project_id, slug)
+    snapshot = session.exec(
+        select(DocVersion).where(DocVersion.doc_id == doc.id, DocVersion.version == version)
+    ).first()
+    if not snapshot:
+        raise NotFoundError(f"Doc '{slug}' has no version {version}")
+    return snapshot
