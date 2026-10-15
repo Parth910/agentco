@@ -8,7 +8,7 @@ test it — all through an internal workspace (task board, docs, chat, git repo)
 runs on your own machine. Every step is observable.
 
 > **Status: early development (M1).** This README describes the target experience.
-> Today, `./setup.sh` prepares your machine and starts the API, and `./agentco status`
+> Today, `make setup` prepares your machine and starts the API, and `make status`
 > checks that everything (including the LLM) is reachable. See the [Roadmap](#roadmap).
 
 This is a learning project for core agentic AI concepts: agent loops, tool calling,
@@ -56,6 +56,7 @@ observability.
 | [Ollama](https://ollama.com) | Runs the LLM locally |
 | 16 GB+ RAM recommended | 8 GB works, but slower and with a weaker model |
 | ~10 GB free disk | Model + containers |
+| `make` | Preinstalled on macOS/Linux (on macOS it comes with Xcode Command Line Tools) |
 
 No API keys, accounts or internet needed after setup.
 
@@ -64,11 +65,11 @@ No API keys, accounts or internet needed after setup.
 ```bash
 git clone https://github.com/Parth910/agentco.git
 cd agentco
-./setup.sh
+make setup
 ```
 
-`setup.sh` checks Docker and Ollama, picks a model for your RAM, pulls it, and starts
-all services. Use `./setup.sh --model <name>` to choose a model yourself, or `--yes` to
+`make setup` checks Docker and Ollama, picks a model for your RAM, pulls it, and starts
+all services. Use `make setup MODEL=<name>` to choose a model yourself, or `YES=1` to
 skip prompts:
 
 ```
@@ -152,12 +153,21 @@ projects/social-feed-2026-10-15/
 ### Everyday commands
 
 ```bash
-./agentco start          # start services
-./agentco stop           # stop services
-./agentco status         # what's running
-./agentco projects       # list past runs
-./agentco resume <name>  # continue a project
-./agentco reset          # wipe all data (asks first)
+make help                # list all commands
+make start               # start services
+make stop                # stop services
+make restart             # restart services
+make status              # what's running, is the LLM reachable
+make logs                # follow logs
+```
+
+Commands that take arguments use the `./agentco` CLI directly (`make` targets wrap it):
+
+```bash
+./agentco launch --idea "..."   # launch a team
+./agentco projects              # list past runs
+./agentco resume <name>         # continue a project
+./agentco reset                 # wipe all data (asks first)
 ```
 
 ### Using a cloud model instead (optional)
@@ -212,7 +222,7 @@ agentco/
 | # | Milestone | Outcome | Status |
 |---|---|---|---|
 | M0 | Foundation | Repo, README, structure | ✅ |
-| M1 | Setup & infra | `./setup.sh` gets a machine ready | ✅ |
+| M1 | Setup & infra | `make setup` gets a machine ready | ✅ |
 | M2 | LLM client | Talks to Ollama or any OpenAI-compatible API | ⬜ |
 | M3 | Workspace | Board, docs, chat APIs — **v0.1.0** | ⬜ |
 | M4 | Tools & permissions | Agents can use workspace tools, scoped by role | ⬜ |
