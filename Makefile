@@ -2,7 +2,7 @@
 # Run `make` or `make help` to see all targets.
 
 .DEFAULT_GOAL := help
-.PHONY: help setup start stop restart status logs
+.PHONY: help setup start stop restart status logs llm-test
 
 # Optional: make setup MODEL=qwen2.5:3b YES=1
 SETUP_ARGS := $(if $(MODEL),--model $(MODEL)) $(if $(YES),--yes)
@@ -21,7 +21,7 @@ help: ## Show this help
 setup: ## First-time setup: check tools, pull model, start services
 	@./setup.sh $(SETUP_ARGS)
 
-start: ## Start all services
+start: ## Start all services (rebuilds if code changed)
 	@./agentco start
 
 stop: ## Stop all services
@@ -34,3 +34,6 @@ status: ## Show services, Ollama and LLM status
 
 logs: ## Follow service logs (Ctrl+C to exit)
 	@./agentco logs
+
+llm-test: ## Check the LLM works (chat + structured output)
+	@./agentco llm-test
