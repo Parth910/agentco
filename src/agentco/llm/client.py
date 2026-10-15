@@ -1,13 +1,21 @@
 """Client for any OpenAI-compatible chat API (Ollama by default)."""
 
+import re
 import time
 from dataclasses import dataclass
+from typing import Generic, TypeVar
 
 from openai import OpenAI
+from pydantic import BaseModel, ValidationError
 
 from agentco.llm.config import LLMConfig
 
 Messages = list[dict[str, str]]
+T = TypeVar("T", bound=BaseModel)
+
+
+class StructuredOutputError(Exception):
+    """The model did not return valid JSON for the schema after all retries."""
 
 
 @dataclass
@@ -17,6 +25,19 @@ class LLMResponse:
     prompt_tokens: int
     completion_tokens: int
     latency_s: float
+
+
+@dataclass
+class StructuredResponse(Generic[T]):
+    data: T
+    response: LLMResponse  # the final, successful call
+    attempts: int
+
+
+def extract_json(text: str) -> str:
+    """Strip ```json fences some models wrap around JSON."""
+    match = re.search(r"```(?:json)?\s*(.*?)\s*```", text, re.DOTALL)
+    return match.group(1) if match else text.strip()
 
 
 def build_messages(prompt: str | Messages, system: str | None = None) -> Messages:
@@ -60,4 +81,42 @@ class LLMClient:
             prompt_tokens=usage.prompt_tokens if usage else 0,
             completion_tokens=usage.completion_tokens if usage else 0,
             latency_s=round(latency, 3),
+        )
+
+    def structured(
+        self,
+        prompt: str | Messages,
+        schema: type[T],
+        system: str | None = None,
+        max_retries: int = 2,
+    ) -> StructuredResponse[T]:
+        """Ask for JSON matching a Pydantic model; validate it and retry on errors.
+
+        On a bad reply, the reply and the validation error are sent back so the
+        model can correct itself.
+        """
+        messages = build_messages(prompt, system)
+        response_format = {
+            "type": "json_schema",
+            "json_schema": {"name": schema.__name__, "schema": schema.model_json_schema()},
+        }
+
+        for attempt in range(1, max_retries + 2):
+            response = self.chat(messages, response_format=response_format)
+            try:
+                data = schema.model_validate_json(extract_json(response.text))
+                return StructuredResponse(data=data, response=response, attempts=attempt)
+            except ValidationError as exc:
+                error = exc
+                messages = messages + [
+                    {"role": "assistant", "content": response.text},
+                    {
+                        "role": "user",
+                        "content": "Your reply did not match the required JSON schema:\n"
+                        f"{exc}\nReply again with only valid JSON.",
+                    },
+                ]
+
+        raise StructuredOutputError(
+            f"No valid {schema.__name__} after {max_retries + 1} attempts: {error}"
         )
