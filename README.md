@@ -7,9 +7,10 @@ engineers, QA, …), and watch them research, write a PRD, plan tickets, write c
 test it — all through an internal workspace (task board, docs, chat, git repo) that
 runs on your own machine. Every step is observable.
 
-> **Status: early development (M1).** This README describes the target experience.
-> Today, `make setup` prepares your machine and starts the API, and `make status`
-> checks that everything (including the LLM) is reachable. See the [Roadmap](#roadmap).
+> **Status: early development (M2).** This README describes the target experience.
+> Today, `make setup` prepares your machine and starts the API, `make status` checks
+> everything is reachable, and `make llm-test` runs a real chat + structured-output
+> call against your local model. See the [Roadmap](#roadmap).
 
 This is a learning project for core agentic AI concepts: agent loops, tool calling,
 multi-agent coordination, role permissions, shared state, human-in-the-loop and
@@ -159,6 +160,8 @@ make stop                # stop services
 make restart             # restart services
 make status              # what's running, is the LLM reachable
 make logs                # follow logs
+make llm-test            # check the LLM works (chat + structured JSON)
+make test                # run unit tests (in Docker)
 ```
 
 Commands that take arguments use the `./agentco` CLI directly (`make` targets wrap it):
@@ -188,8 +191,11 @@ Models can also be set per role, e.g. a local model for most roles and a stronge
 
 Small local models are much weaker than frontier APIs, so the system is built around that:
 
+- **Thinking off by default** — reasoning models like qwen3 "think" before answering
+  (a one-line reply took 75 s). `LLM_REASONING_EFFORT=none` makes simple calls ~100x faster.
 - **One agent at a time** — one model in memory, agents take turns.
-- **Structured outputs** — every action is JSON validated against a schema.
+- **Structured outputs** — every action is JSON validated against a Pydantic schema;
+  on a bad reply the validation error is sent back and the model retries.
 - **Small tasks** — the Program Manager breaks work into small tickets.
 - **Short context** — agents read only what they need (their ticket, the relevant doc).
 - **Hard limits** — max steps, max runtime, so agents can't loop forever.
@@ -223,7 +229,7 @@ agentco/
 |---|---|---|---|
 | M0 | Foundation | Repo, README, structure | ✅ |
 | M1 | Setup & infra | `make setup` gets a machine ready | ✅ |
-| M2 | LLM client | Talks to Ollama or any OpenAI-compatible API | ⬜ |
+| M2 | LLM client | Talks to Ollama or any OpenAI-compatible API | ✅ |
 | M3 | Workspace | Board, docs, chat APIs — **v0.1.0** | ⬜ |
 | M4 | Tools & permissions | Agents can use workspace tools, scoped by role | ⬜ |
 | M5 | First agent (PM) | Idea → PRD + tickets — **v0.2.0** | ⬜ |
