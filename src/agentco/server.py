@@ -11,7 +11,7 @@ from sqlalchemy import Engine
 from agentco import __version__
 from agentco.workspace.api import router as workspace_router
 from agentco.workspace.db import init_db, make_engine
-from agentco.workspace.service import NotFoundError
+from agentco.workspace.service import InvalidError, NotFoundError
 
 
 async def check_llm() -> dict:
@@ -51,6 +51,10 @@ def create_app(engine: Engine | None = None) -> FastAPI:
     @app.exception_handler(NotFoundError)
     async def not_found(_request: Request, exc: NotFoundError) -> JSONResponse:
         return JSONResponse(status_code=404, content={"detail": str(exc)})
+
+    @app.exception_handler(InvalidError)
+    async def invalid(_request: Request, exc: InvalidError) -> JSONResponse:
+        return JSONResponse(status_code=400, content={"detail": str(exc)})
 
     @app.get("/health", tags=["system"])
     async def health() -> dict:
