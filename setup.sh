@@ -1,22 +1,28 @@
 #!/usr/bin/env bash
 # AgentCo setup: checks prerequisites, picks a model, starts services.
-# Usage: ./setup.sh [--yes]
+# Usage: ./setup.sh [--yes] [--model <name>]
 set -euo pipefail
 
 cd "$(dirname "$0")"
 
 OLLAMA_URL="${OLLAMA_URL:-http://localhost:11434}"
 ASSUME_YES=false
+MODEL=""
 
-for arg in "$@"; do
-  case "$arg" in
+usage() {
+  echo "Usage: ./setup.sh [--yes] [--model <name>]"
+  echo "  -y, --yes          answer yes to all prompts"
+  echo "  -m, --model NAME   use this Ollama model instead of the RAM-based pick"
+}
+
+while [ $# -gt 0 ]; do
+  case "$1" in
     -y|--yes) ASSUME_YES=true ;;
-    -h|--help)
-      echo "Usage: ./setup.sh [--yes]"
-      echo "  -y, --yes    answer yes to all prompts"
-      exit 0 ;;
-    *) echo "Unknown option: $arg" >&2; exit 1 ;;
+    -m|--model) MODEL="${2:?--model needs a value}"; shift ;;
+    -h|--help) usage; exit 0 ;;
+    *) echo "Unknown option: $1" >&2; usage; exit 1 ;;
   esac
+  shift
 done
 
 # --- output helpers ---------------------------------------------------------
@@ -46,11 +52,85 @@ check_ollama() {
   ok "Ollama running"
 }
 
+confirm() {
+  $ASSUME_YES && return 0
+  local reply
+  read -r -p "? $1 [Y/n] " reply
+  [[ -z "$reply" || "$reply" =~ ^[Yy] ]]
+}
+
+# --- model ------------------------------------------------------------------
+ram_gb() {
+  case "$(uname -s)" in
+    Darwin) echo $(( $(sysctl -n hw.memsize) / 1024 / 1024 / 1024 )) ;;
+    Linux) echo $(( $(awk '/MemTotal/ {print $2}' /proc/meminfo) / 1024 / 1024 )) ;;
+    *) echo 0 ;;
+  esac
+}
+
+recommend_model() {
+  local ram=$1
+  if   [ "$ram" -ge 32 ]; then echo "qwen3:14b"
+  elif [ "$ram" -ge 16 ]; then echo "qwen3:8b"
+  else                         echo "qwen3:4b"
+  fi
+}
+
+choose_model() {
+  if [ -n "$MODEL" ]; then
+    ok "Using model from --model: $MODEL"
+    return
+  fi
+  local ram
+  ram=$(ram_gb)
+  MODEL=$(recommend_model "$ram")
+  ok "Detected ${ram} GB RAM → recommended model: $MODEL"
+  [ "$ram" -lt 16 ] && warn "Under 16 GB RAM: runs will be slow and the model is limited."
+  return 0
+}
+
+ensure_model() {
+  if ollama show "$MODEL" >/dev/null 2>&1; then
+    ok "Model ready ($MODEL)"
+    return
+  fi
+  confirm "Pull $MODEL now? (several GB, one-time download)" \
+    || fail "A model is required. Pull it later with: ollama pull $MODEL"
+  ollama pull "$MODEL"
+  ok "Model ready ($MODEL)"
+}
+
+# --- config -----------------------------------------------------------------
+set_env() {
+  # set_env KEY VALUE: replace the line in .env (portable across macOS/Linux sed)
+  local key=$1 value=$2 tmp
+  tmp=$(mktemp)
+  if grep -q "^${key}=" .env; then
+    awk -v k="$key" -v v="$value" -F= '$1==k {print k"="v; next} {print}' .env > "$tmp"
+  else
+    cat .env > "$tmp"; echo "${key}=${value}" >> "$tmp"
+  fi
+  mv "$tmp" .env
+}
+
+ensure_env() {
+  if [ -f .env ]; then
+    ok "Using existing .env"
+  else
+    cp .env.example .env
+    ok "Created .env from .env.example"
+  fi
+  set_env LLM_MODEL "$MODEL"
+}
+
 main() {
   echo "AgentCo setup"
   echo
   check_docker
   check_ollama
+  choose_model
+  ensure_model
+  ensure_env
 }
 
 main
