@@ -123,6 +123,37 @@ ensure_env() {
   set_env LLM_MODEL "$MODEL"
 }
 
+# --- services ---------------------------------------------------------------
+api_port() {
+  grep -E '^WORKSPACE_API_PORT=' .env | cut -d= -f2 || true
+}
+
+start_services() {
+  echo "… Starting services (first run builds images, this can take a minute)"
+  docker compose up -d --build --wait \
+    || fail "Services failed to start. See logs with: docker compose logs"
+  ok "Services healthy"
+}
+
+report_llm() {
+  local port health
+  port=$(api_port); port=${port:-8000}
+  health=$(curl -fsS "http://localhost:$port/health") || fail "API not responding on port $port"
+  if echo "$health" | grep -q '"reachable":true'; then
+    if echo "$health" | grep -q '"model_available":true'; then
+      ok "API can reach the LLM ($MODEL)"
+    else
+      warn "API reaches the LLM, but model '$MODEL' is not listed there"
+    fi
+  else
+    warn "API cannot reach Ollama from inside Docker."
+    [ "$(uname -s)" = "Linux" ] && warn "On Linux, start Ollama with OLLAMA_HOST=0.0.0.0 so containers can reach it."
+  fi
+  echo
+  green "🚀 AgentCo is ready → http://localhost:$port/health"
+  echo "   (The dashboard arrives in milestone M8.)"
+}
+
 main() {
   echo "AgentCo setup"
   echo
@@ -131,6 +162,8 @@ main() {
   choose_model
   ensure_model
   ensure_env
+  start_services
+  report_llm
 }
 
 main
