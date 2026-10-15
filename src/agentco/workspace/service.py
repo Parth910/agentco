@@ -10,6 +10,8 @@ from agentco.workspace.models import (
     Doc,
     DocVersion,
     DocWrite,
+    Message,
+    MessageCreate,
     Project,
     ProjectCreate,
     Ticket,
@@ -29,6 +31,8 @@ class InvalidError(Exception):
 
 
 SLUG_PATTERN = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
+# "@pm" counts only at a word start, so emails like "a@b.com" are not mentions.
+MENTION_PATTERN = re.compile(r"(?<![\w@])@([a-z0-9_]+)")
 
 
 # --- projects ----------------------------------------------------------------
@@ -171,3 +175,51 @@ def get_doc_version(session: Session, project_id: int, slug: str, version: int) 
     if not snapshot:
         raise NotFoundError(f"Doc '{slug}' has no version {version}")
     return snapshot
+
+
+# --- chat --------------------------------------------------------------------
+
+def parse_mentions(body: str) -> list[str]:
+    """'@pm and @qa, @pm' -> ['pm', 'qa'] (order kept, no duplicates)."""
+    return list(dict.fromkeys(MENTION_PATTERN.findall(body)))
+
+
+def post_message(session: Session, project_id: int, channel: str, data: MessageCreate) -> Message:
+    if not SLUG_PATTERN.match(channel):
+        raise InvalidError(f"Invalid channel '{channel}': use lowercase letters, digits and dashes")
+    get_project(session, project_id)
+    message = Message.model_validate(
+        data,
+        update={"project_id": project_id, "channel": channel, "mentions": parse_mentions(data.body)},
+    )
+    session.add(message)
+    session.commit()
+    session.refresh(message)
+    return message
+
+
+def list_channels(session: Session, project_id: int) -> list[str]:
+    get_project(session, project_id)
+    query = select(Message.channel).where(Message.project_id == project_id).distinct()
+    return sorted(session.exec(query))
+
+
+def list_messages(
+    session: Session,
+    project_id: int,
+    channel: str | None = None,
+    mention: str | None = None,
+    after_id: int = 0,
+    limit: int = 50,
+) -> list[Message]:
+    """Messages oldest-first. With after_id: only newer ones (for polling).
+    Without: the latest `limit` messages."""
+    get_project(session, project_id)
+    query = select(Message).where(Message.project_id == project_id, Message.id > after_id)
+    if channel:
+        query = query.where(Message.channel == channel)
+    messages = list(session.exec(query.order_by(Message.id)))
+    if mention:
+        # Filtered in Python: simple, and fine at workspace scale.
+        messages = [m for m in messages if mention in m.mentions]
+    return messages[:limit] if after_id else messages[-limit:]
