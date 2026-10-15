@@ -3,7 +3,7 @@
 from datetime import datetime, timezone
 from enum import Enum
 
-from sqlalchemy import UniqueConstraint
+from sqlalchemy import JSON, Column, UniqueConstraint
 from sqlmodel import Field, SQLModel
 
 
@@ -97,4 +97,19 @@ class DocVersion(DocWrite, table=True):
     id: int | None = Field(default=None, primary_key=True)
     doc_id: int = Field(foreign_key="doc.id", index=True)
     version: int
+    created_at: datetime = Field(default_factory=utcnow)
+
+
+# --- chat --------------------------------------------------------------------
+
+class MessageCreate(SQLModel):
+    author: str = Field(min_length=1)
+    body: str = Field(min_length=1)
+
+
+class Message(MessageCreate, table=True):
+    id: int | None = Field(default=None, primary_key=True)
+    project_id: int = Field(foreign_key="project.id", index=True)
+    channel: str = Field(index=True)  # e.g. "general", "eng"
+    mentions: list[str] = Field(default_factory=list, sa_column=Column(JSON))
     created_at: datetime = Field(default_factory=utcnow)

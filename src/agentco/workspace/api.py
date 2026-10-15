@@ -2,7 +2,7 @@
 
 from collections.abc import Iterator
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Query, Request
 from sqlmodel import Session
 
 from agentco.workspace import service
@@ -12,6 +12,8 @@ from agentco.workspace.models import (
     Doc,
     DocVersion,
     DocWrite,
+    Message,
+    MessageCreate,
     Project,
     ProjectCreate,
     Ticket,
@@ -117,3 +119,41 @@ def get_doc_version(
     project_id: int, slug: str, version: int, session: Session = SessionDep
 ) -> DocVersion:
     return service.get_doc_version(session, project_id, slug, version)
+
+
+# --- chat --------------------------------------------------------------------
+
+@router.post("/{project_id}/channels/{channel}/messages", status_code=201, tags=["chat"])
+def post_message(
+    project_id: int, channel: str, data: MessageCreate, session: Session = SessionDep
+) -> Message:
+    """Post to a channel. @mentions in the body are detected automatically."""
+    return service.post_message(session, project_id, channel, data)
+
+
+@router.get("/{project_id}/channels", tags=["chat"])
+def list_channels(project_id: int, session: Session = SessionDep) -> list[str]:
+    return service.list_channels(session, project_id)
+
+
+@router.get("/{project_id}/channels/{channel}/messages", tags=["chat"])
+def list_channel_messages(
+    project_id: int,
+    channel: str,
+    after_id: int = 0,
+    limit: int = Query(default=50, ge=1, le=500),
+    session: Session = SessionDep,
+) -> list[Message]:
+    return service.list_messages(session, project_id, channel=channel, after_id=after_id, limit=limit)
+
+
+@router.get("/{project_id}/messages", tags=["chat"])
+def list_messages(
+    project_id: int,
+    mention: str | None = None,
+    after_id: int = 0,
+    limit: int = Query(default=50, ge=1, le=500),
+    session: Session = SessionDep,
+) -> list[Message]:
+    """Messages across all channels; use ?mention=pm for a role's inbox."""
+    return service.list_messages(session, project_id, mention=mention, after_id=after_id, limit=limit)
