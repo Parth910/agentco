@@ -188,7 +188,7 @@ Small local models are much weaker than frontier APIs, so the system is built ar
 
 ```
 agentco/
-├── agentco/            # Python package
+├── src/agentco/        # Python package
 │   ├── llm/            # OpenAI-compatible LLM client
 │   ├── workspace/      # Board, docs, chat (SQLite + API)
 │   ├── tools/          # Workspace APIs exposed as agent tools + permissions
