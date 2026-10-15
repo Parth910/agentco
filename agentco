@@ -1,0 +1,99 @@
+#!/usr/bin/env bash
+# AgentCo command-line interface.
+set -euo pipefail
+
+cd "$(dirname "$0")"
+
+green() { printf '\033[32m%s\033[0m\n' "$*"; }
+yellow() { printf '\033[33m%s\033[0m\n' "$*"; }
+red() { printf '\033[31m%s\033[0m\n' "$*"; }
+
+usage() {
+  cat <<'EOF'
+Usage: ./agentco <command>
+
+Commands:
+  start      Start all services
+  stop       Stop all services
+  status     Show services, Ollama and LLM status
+  logs       Follow service logs (Ctrl+C to exit)
+  help       Show this help
+
+Coming later:
+  launch     Launch a team on a product idea   (M5)
+  projects   List past runs                    (M10)
+  resume     Continue a project                (M10)
+  reset      Wipe all data                     (M10)
+EOF
+}
+
+require_env() {
+  [ -f .env ] || { red "✘ No .env found. Run ./setup.sh first."; exit 1; }
+}
+
+api_port() {
+  local port
+  port=$(grep -E '^WORKSPACE_API_PORT=' .env 2>/dev/null | cut -d= -f2 || true)
+  echo "${port:-8000}"
+}
+
+cmd_start() {
+  require_env
+  docker compose up -d --wait
+  green "✔ AgentCo running → http://localhost:$(api_port)/health"
+}
+
+cmd_stop() {
+  docker compose down
+  green "✔ AgentCo stopped"
+}
+
+cmd_status() {
+  require_env
+  echo "Services:"
+  docker compose ps --format '{{.Service}}: {{.Status}}' | sed 's/^/  /'
+  [ -z "$(docker compose ps -q)" ] && yellow "  (none running, start with ./agentco start)"
+  echo
+
+  if curl -fsS http://localhost:11434/api/version >/dev/null 2>&1; then
+    green "✔ Ollama running on host"
+  else
+    red "✘ Ollama not running on host"
+  fi
+
+  local health
+  if health=$(curl -fsS "http://localhost:$(api_port)/health" 2>/dev/null); then
+    green "✔ API healthy"
+    if echo "$health" | grep -q '"model_available":true'; then
+      green "✔ LLM reachable from API, model available"
+    elif echo "$health" | grep -q '"reachable":true'; then
+      yellow "! LLM reachable from API, but the configured model is missing"
+    else
+      red "✘ API cannot reach the LLM"
+    fi
+  else
+    red "✘ API not responding"
+  fi
+}
+
+cmd_logs() {
+  docker compose logs -f
+}
+
+not_yet() {
+  yellow "'$1' is not available yet (planned for $2). See the Roadmap in README.md."
+  exit 1
+}
+
+case "${1:-help}" in
+  start)    cmd_start ;;
+  stop)     cmd_stop ;;
+  status)   cmd_status ;;
+  logs)     cmd_logs ;;
+  launch)   not_yet launch M5 ;;
+  projects) not_yet projects M10 ;;
+  resume)   not_yet resume M10 ;;
+  reset)    not_yet reset M10 ;;
+  help|-h|--help) usage ;;
+  *) red "Unknown command: $1"; echo; usage; exit 1 ;;
+esac
