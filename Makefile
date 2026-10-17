@@ -4,8 +4,8 @@
 .DEFAULT_GOAL := help
 .PHONY: help setup start stop restart status logs llm-test tools-demo test
 
-# Optional: make setup MODEL=qwen2.5:3b YES=1
-SETUP_ARGS := $(if $(MODEL),--model $(MODEL)) $(if $(YES),--yes)
+# Optional: make setup MODEL=qwen2.5:3b CONTEXT=8192 YES=1
+SETUP_ARGS := $(if $(MODEL),--model $(MODEL)) $(if $(CONTEXT),--context $(CONTEXT)) $(if $(YES),--yes)
 
 help: ## Show this help
 	@echo "AgentCo"
@@ -16,6 +16,7 @@ help: ## Show this help
 	@echo
 	@echo "Options for setup:"
 	@echo "  MODEL=<name>   use a specific Ollama model   (make setup MODEL=qwen2.5:3b)"
+	@echo "  CONTEXT=<n>    context window in tokens          (make setup CONTEXT=8192)"
 	@echo "  YES=1          answer yes to all prompts"
 
 setup: ## First-time setup: check tools, pull model, start services

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # AgentCo setup: checks prerequisites, picks a model, starts services.
-# Usage: ./setup.sh [--yes] [--model <name>]
+# Usage: ./setup.sh [--yes] [--model <name>] [--context <tokens>]
 set -euo pipefail
 
 cd "$(dirname "$0")"
@@ -8,17 +8,20 @@ cd "$(dirname "$0")"
 OLLAMA_URL="${OLLAMA_URL:-http://localhost:11434}"
 ASSUME_YES=false
 MODEL=""
+CONTEXT=""
 
 usage() {
-  echo "Usage: ./setup.sh [--yes] [--model <name>]"
-  echo "  -y, --yes          answer yes to all prompts"
-  echo "  -m, --model NAME   use this Ollama model instead of the RAM-based pick"
+  echo "Usage: ./setup.sh [--yes] [--model <name>] [--context <tokens>]"
+  echo "  -y, --yes            answer yes to all prompts"
+  echo "  -m, --model NAME     use this Ollama model instead of the RAM-based pick"
+  echo "  -c, --context TOKENS context window size instead of the RAM-based pick"
 }
 
 while [ $# -gt 0 ]; do
   case "$1" in
     -y|--yes) ASSUME_YES=true ;;
     -m|--model) MODEL="${2:?--model needs a value}"; shift ;;
+    -c|--context) CONTEXT="${2:?--context needs a value}"; shift ;;
     -h|--help) usage; exit 0 ;;
     *) echo "Unknown option: $1" >&2; usage; exit 1 ;;
   esac
@@ -100,6 +103,30 @@ ensure_model() {
   ok "Model ready ($MODEL)"
 }
 
+# Ollama defaults to a small context window (often 4096 tokens) and silently drops
+# older text beyond it, so agents would forget their task. The OpenAI-compatible API
+# can't change this per request, so we create a variant of the model with a larger
+# window. It shares the original's weights: no extra download or disk space.
+recommend_context() {
+  local ram=$1
+  if   [ "$ram" -ge 32 ]; then echo 32768
+  elif [ "$ram" -ge 16 ]; then echo 16384
+  else                         echo 8192
+  fi
+}
+
+create_agent_model() {
+  [ -n "$CONTEXT" ] || CONTEXT=$(recommend_context "$(ram_gb)")
+  AGENT_MODEL="agentco-$(echo "$MODEL" | tr ':/' '--')"
+  local modelfile
+  modelfile=$(mktemp)
+  printf 'FROM %s\nPARAMETER num_ctx %s\n' "$MODEL" "$CONTEXT" > "$modelfile"
+  ollama create "$AGENT_MODEL" -f "$modelfile" >/dev/null 2>&1 \
+    || { rm -f "$modelfile"; fail "Could not create $AGENT_MODEL from $MODEL"; }
+  rm -f "$modelfile"
+  ok "Created $AGENT_MODEL ($MODEL with a ${CONTEXT}-token context window)"
+}
+
 # --- config -----------------------------------------------------------------
 set_env() {
   # set_env KEY VALUE: replace the line in .env (portable across macOS/Linux sed)
@@ -120,7 +147,7 @@ ensure_env() {
     cp .env.example .env
     ok "Created .env from .env.example"
   fi
-  set_env LLM_MODEL "$MODEL"
+  set_env LLM_MODEL "$AGENT_MODEL"
 }
 
 # --- services ---------------------------------------------------------------
@@ -141,9 +168,9 @@ report_llm() {
   health=$(curl -fsS "http://localhost:$port/health") || fail "API not responding on port $port"
   if echo "$health" | grep -q '"reachable":true'; then
     if echo "$health" | grep -q '"model_available":true'; then
-      ok "API can reach the LLM ($MODEL)"
+      ok "API can reach the LLM ($AGENT_MODEL)"
     else
-      warn "API reaches the LLM, but model '$MODEL' is not listed there"
+      warn "API reaches the LLM, but model '$AGENT_MODEL' is not listed there"
     fi
   else
     warn "API cannot reach Ollama from inside Docker."
@@ -161,6 +188,7 @@ main() {
   check_ollama
   choose_model
   ensure_model
+  create_agent_model
   ensure_env
   start_services
   report_llm

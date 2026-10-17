@@ -29,12 +29,14 @@ async def check_llm() -> dict:
     except httpx.HTTPError as exc:
         return {"reachable": False, "base_url": base_url, "model": model, "error": str(exc)}
 
-    available = [m["id"] for m in resp.json().get("data", [])]
+    available = {m["id"] for m in resp.json().get("data", [])}
+    # Ollama lists "name:latest" for a model you refer to as just "name".
+    names = {model, f"{model}:latest"} if ":" not in model else {model}
     return {
         "reachable": True,
         "base_url": base_url,
         "model": model,
-        "model_available": model in available,
+        "model_available": bool(names & available),
     }
 
 
