@@ -5,6 +5,7 @@ from agentco.llm.client import (
     LLMResponse,
     StructuredOutputError,
     StructuredResponse,
+    ToolCall,
 )
 from agentco.llm.config import LLMConfig
 
@@ -14,4 +15,5 @@ __all__ = [
     "LLMResponse",
     "StructuredOutputError",
     "StructuredResponse",
+    "ToolCall",
 ]
