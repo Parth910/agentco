@@ -1,5 +1,5 @@
-"""Runs tool calls for one agent: parses and validates arguments, executes the tool,
-and turns every failure into an error message the agent can learn from."""
+"""Runs tool calls for one agent: checks permissions, parses and validates arguments,
+executes the tool, and turns every failure into an error message the agent can learn from."""
 
 import json
 from typing import Any
@@ -7,6 +7,7 @@ from typing import Any
 from pydantic import BaseModel, ValidationError
 
 from agentco.tools.base import Registry, ToolContext, ToolError, ToolResult
+from agentco.tools.permissions import is_allowed, tools_for_role
 from agentco.workspace.service import InvalidError, NotFoundError
 
 
@@ -29,19 +30,36 @@ def format_validation_error(exc: ValidationError) -> str:
 
 
 class ToolBox:
-    def __init__(self, registry: Registry, ctx: ToolContext):
+    def __init__(self, registry: Registry, ctx: ToolContext, allowed: list[str] | None = None):
+        """allowed: tool name patterns this agent may use (None = all tools)."""
         self.registry = registry
         self.ctx = ctx
+        self.allowed = ["*"] if allowed is None else allowed
+
+    @classmethod
+    def for_role(cls, registry: Registry, ctx: ToolContext) -> "ToolBox":
+        """A toolbox limited to the default tools of ctx.actor's role."""
+        return cls(registry, ctx, tools_for_role(ctx.actor))
+
+    def names(self) -> list[str]:
+        """Tools this agent may use. Only these are shown to the LLM."""
+        return [name for name in self.registry.names() if is_allowed(name, self.allowed)]
 
     def schemas(self) -> list[dict]:
-        return [self.registry.tools[name].schema() for name in self.registry.names()]
+        return [self.registry.tools[name].schema() for name in self.names()]
 
     def call(self, name: str, arguments: str | dict | None = None) -> ToolResult:
         """Run one tool call. Never raises: problems come back as ToolResult(ok=False)."""
         tool = self.registry.get(name)
         if tool is None:
-            available = ", ".join(self.registry.names())
+            available = ", ".join(self.names())
             return ToolResult(ok=False, error=f"Unknown tool '{name}'. Available tools: {available}")
+        if not is_allowed(name, self.allowed):
+            yours = ", ".join(self.names()) or "none"
+            return ToolResult(
+                ok=False,
+                error=f"Permission denied: {self.ctx.actor} cannot use {name}. Your tools: {yours}",
+            )
 
         if isinstance(arguments, str):
             try:
