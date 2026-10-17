@@ -7,11 +7,11 @@ engineers, QA, …), and watch them research, write a PRD, plan tickets, write c
 test it — all through an internal workspace (task board, docs, chat, git repo) that
 runs on your own machine. Every step is observable.
 
-> **Status: early development (M4).** This README describes the target experience.
-> Today: `make setup` prepares your machine, the [workspace API](#workspace-api) (board,
-> docs, chat, events) is live at http://localhost:8000/docs, and `make tools-demo` shows
-> your local model using [agent tools](#agent-tools) as different roles. Full agents
-> arrive in M5. See the [Roadmap](#roadmap).
+> **Status: early development (v0.2, M5).** This README describes the target experience.
+> Today: `make launch IDEA="..."` runs a **PM agent** on your local model that writes a
+> PRD, creates tickets and posts a kickoff, all visible in the
+> [workspace API](#workspace-api) at http://localhost:8000/docs. Engineers and QA join
+> in M6; the dashboard in M8. See the [Roadmap](#roadmap).
 
 This is a learning project for core agentic AI concepts: agent loops, tool calling,
 multi-agent coordination, role permissions, shared state, human-in-the-loop and
@@ -78,23 +78,53 @@ skip prompts:
 ✔ Docker running
 ✔ Ollama running
 ✔ Detected 18 GB RAM → recommended model: qwen3:8b
-✔ Model ready
+✔ Model ready (qwen3:8b)
+✔ Created agentco-qwen3-8b (qwen3:8b with a 16384-token context window)
 ✔ Starting services (workspace, agents, dashboard, langfuse)...
 
 🚀 AgentCo is ready → http://localhost:3000
 ```
 
-| RAM | Recommended model |
-|---|---|
-| 8 GB | `qwen3:4b` (demo only) |
-| 16–24 GB | `qwen3:8b` |
-| 32 GB+ | `qwen3:14b` or larger |
+| RAM | Recommended model | Context window |
+|---|---|---|
+| 8 GB | `qwen3:4b` (demo only) | 8,192 |
+| 16–24 GB | `qwen3:8b` | 16,384 |
+| 32 GB+ | `qwen3:14b` or larger | 32,768 |
 
 > On macOS, Ollama runs natively (not in Docker) so it can use the Apple GPU.
+>
+> Ollama's default context window is small (often 4,096 tokens) and it **silently drops**
+> older text beyond it, so agents would forget their task. Setup creates an
+> `agentco-<model>` variant with a larger window (same weights, no extra download).
+> Override with `make setup CONTEXT=8192`.
 
 ### 2. Launch a product
 
-Open the dashboard and click **Launch a new product**:
+**Today (v0.2):** the PM agent plans the product from the command line.
+
+```bash
+make launch IDEA="A simple social feed for college students: post short text updates, like posts, and see a feed of posts from their campus."
+```
+
+```
+🚀 Launching "A simple social feed for college"  (project 6)
+[pm] A simple social feed for college students: …
+  [ 1] 🔧 docs_write({"title":"PRD: Campus Feed","content":"## PRD: Campus Feed…)
+       ✔ {"slug": "prd", "version": 1}
+  [ 1] 🔧 board_create_ticket({"priority":1,"title":"Implement user registration and login"…)
+       ✔ {"number": 1, "title": "Implement user registration and login", "status": "todo", …}
+  …
+  [ 1] 🔧 chat_post({"channel":"general","body":"Kickoff for Campus Feed: … @engineer_1 and @qa …"})
+       ✔ {"id": 5, "channel": "general", "mentions": ["engineer_1", "qa"]}
+
+✔ PM finished in 38s · 2 steps · 7 tool calls · 0 nudges · 4,410 tokens
+
+📄 PRD: Campus Feed  (v1, 175 words)
+📋 Board: 5 tickets
+💬 #general  pm: Kickoff for Campus Feed …
+```
+
+**Target experience:** open the dashboard and click **Launch a new product**:
 
 1. **Describe the product** — e.g. *"A simple social feed for college students: post text, like posts, see a feed."*
 2. **Pick a team template**
@@ -105,10 +135,11 @@ Open the dashboard and click **Launch a new product**:
 4. **Set limits** — max runtime, max steps, which checkpoints need your approval
 5. **🚀 Launch**
 
-Or from the CLI:
+Or from the CLI (team config files arrive in M9):
 
 ```bash
-./agentco launch --config teams/lean-startup.yaml --idea "Social feed app..."
+./agentco launch --idea "Social feed app..." [--name "Campus feed"]
+./agentco launch --config teams/lean-startup.yaml --idea "..."   # M9
 ```
 
 ### 3. Watch the team work
@@ -162,6 +193,7 @@ make restart             # restart services
 make status              # what's running, is the LLM reachable
 make logs                # follow logs
 make llm-test            # check the LLM works (chat + structured JSON)
+make launch IDEA="..."   # launch the team (today: the PM agent) on an idea
 make tools-demo          # watch the LLM use workspace tools as different roles
 make test                # run unit tests (in Docker)
 ```
@@ -267,12 +299,39 @@ $ make tools-demo
 
 ---
 
+## How an agent works
+
+```
+ask the LLM (system prompt + task + tools) ──▶ tool calls? ──yes──▶ run them, add results ──┐
+        ▲                                          │                                         │
+        │                                          no: it says it's done                     │
+        │                                          ▼                                         │
+        │                                  completion check: is the work really there?       │
+        │                                    ├─ yes ──▶ finished                             │
+        └────── "Not done yet: …" ◀──────────┘  no (at most 2 nudges)                         │
+        └─────────────────────────────────────────────────────────────────────────────────────┘
+                                 stops at max_steps, so it can never loop forever
+```
+
+- **Role** (`agents/roles.py`): who the agent is: system prompt, step limit, completion check.
+- **Loop** (`agents/base.py`): the cycle above. Tool errors are fed back so the model can fix its call.
+- **Completion check**: small models often stop early and claim success. The PM's check
+  verifies the PRD exists, there are at least 4 tickets, and the kickoff was posted;
+  if not, it tells the agent exactly what is missing.
+- **Events**: `agent_started` → `tool_called`… → `agent_message` → `agent_nudged` →
+  `agent_finished` (steps, tool calls, tokens, duration) in the project timeline.
+
+---
+
 ## Design notes for local models
 
 Small local models are much weaker than frontier APIs, so the system is built around that:
 
 - **Thinking off by default** — reasoning models like qwen3 "think" before answering
   (a one-line reply took 75 s). `LLM_REASONING_EFFORT=none` makes simple calls ~100x faster.
+- **Bigger context window** — Ollama silently truncates at its default 4,096 tokens;
+  setup creates a model variant with 8k–32k depending on RAM.
+- **Completion checks** — code verifies the work and nudges the agent if it stopped early.
 - **One agent at a time** — one model in memory, agents take turns.
 - **Structured outputs** — every action is JSON validated against a Pydantic schema;
   on a bad reply the validation error is sent back and the model retries.
@@ -290,7 +349,7 @@ agentco/
 │   ├── llm/            # OpenAI-compatible LLM client
 │   ├── workspace/      # Board, docs, chat: models, service (logic), api (HTTP)
 │   ├── tools/          # Tool framework, workspace tools, role permissions
-│   ├── agents/         # Agent loop and roles
+│   ├── agents/         # Agent loop (base.py) and roles (roles.py)
 │   ├── orchestrator/   # Team workflow (LangGraph)
 │   ├── control/        # Runtime control API
 │   └── observability/  # Tracing (event log lives in workspace/)
@@ -312,7 +371,7 @@ agentco/
 | M2 | LLM client | Talks to Ollama or any OpenAI-compatible API | ✅ |
 | M3 | Workspace | Board, docs, chat APIs — **v0.1.0** | ✅ |
 | M4 | Tools & permissions | Agents can use workspace tools, scoped by role | ✅ |
-| M5 | First agent (PM) | Idea → PRD + tickets — **v0.2.0** | ⬜ |
+| M5 | First agent (PM) | Idea → PRD + tickets — **v0.2.0** | ✅ |
 | M6 | Team workflow | PM → Engineer → QA end to end — **v0.3.0** | ⬜ |
 | M7 | Observability | Langfuse traces, run reports | ⬜ |
 | M8 | Dashboard | Watch the team live — **v0.4.0** | ⬜ |
