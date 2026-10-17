@@ -4,8 +4,12 @@ Ask the LLM; if it calls tools, run them and add the results to the conversation
 repeat. The agent is done when it replies without calling a tool. A step limit
 guarantees it can never loop forever.
 
-Each run is logged as events: agent_started, agent_message, agent_finished
-(tool calls are logged by the ToolBox as tool_called).
+Small models often stop early and claim they are done. An optional `check_done`
+function verifies the actual work; if something is missing, the agent gets a
+specific reminder and continues (at most `max_nudges` times).
+
+Each run is logged as events: agent_started, agent_message, agent_nudged,
+agent_finished (tool calls are logged by the ToolBox as tool_called).
 """
 
 import time
@@ -18,15 +22,18 @@ from agentco.workspace.service import log_event
 
 # on_event(kind, data): lets a caller show progress, e.g. ("tool", {...}).
 EventCallback = Callable[[str, dict], None]
+# check_done(): None if the work is complete, else a reminder of what is missing.
+DoneCheck = Callable[[], str | None]
 
 
 @dataclass
 class AgentRun:
     role: str
     final_text: str
-    stop_reason: str  # "done" | "max_steps" | "llm_error"
+    stop_reason: str  # "done" | "incomplete" | "max_steps" | "llm_error"
     steps: int = 0
     tool_calls: int = 0
+    nudges: int = 0
     prompt_tokens: int = 0
     completion_tokens: int = 0
     duration_s: float = 0.0
@@ -42,6 +49,8 @@ class Agent:
         toolbox: ToolBox,
         max_steps: int = 20,
         on_event: EventCallback | None = None,
+        check_done: DoneCheck | None = None,
+        max_nudges: int = 2,
     ):
         self.role = role
         self.system_prompt = system_prompt
@@ -49,6 +58,8 @@ class Agent:
         self.toolbox = toolbox
         self.max_steps = max_steps
         self.on_event = on_event or (lambda kind, data: None)
+        self.check_done = check_done or (lambda: None)
+        self.max_nudges = max_nudges
 
     def run(self, task: str) -> AgentRun:
         started = time.perf_counter()
@@ -77,9 +88,19 @@ class Agent:
                 self._log("agent_message", step=run.steps, text=reply.text.strip())
 
             if not reply.tool_calls:
-                run.stop_reason = "done"
                 run.final_text = reply.text.strip()
-                break
+                missing = self.check_done()
+                if missing is None:
+                    run.stop_reason = "done"
+                    break
+                if run.nudges >= self.max_nudges:
+                    run.stop_reason = "incomplete"
+                    break
+                run.nudges += 1
+                messages.append({"role": "user", "content": f"Not done yet: {missing}"})
+                self.on_event("nudge", {"step": run.steps, "text": missing})
+                self._log("agent_nudged", step=run.steps, missing=missing)
+                continue
 
             for call in reply.tool_calls:
                 result = self.toolbox.call(call.name, call.arguments)
@@ -104,6 +125,7 @@ class Agent:
             stop_reason=run.stop_reason,
             steps=run.steps,
             tool_calls=run.tool_calls,
+            nudges=run.nudges,
             prompt_tokens=run.prompt_tokens,
             completion_tokens=run.completion_tokens,
             duration_s=run.duration_s,
