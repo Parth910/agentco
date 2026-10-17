@@ -50,3 +50,22 @@ def test_unknown_role_gets_no_tools(toolbox_for):
     box = toolbox_for("intern")
     assert box.names() == []
     assert "Your tools: none" in box.call("chat_post", {"channel": "general", "body": "hi"}).error
+
+
+def test_every_call_is_logged_including_failures(toolbox_for, session):
+    eng = toolbox_for("engineer_1")
+    eng.call("board_list_tickets", "{}")
+    eng.call("docs_write", {"slug": "prd", "title": "x", "content": "y"})  # denied
+    eng.call("board_get_ticket", "{bad json")
+
+    project_id = eng.ctx.project_id
+    calls = [e for e in service.list_events(session, project_id) if e.type == "tool_called"]
+    assert [(e.actor, e.data["tool"], e.data["ok"]) for e in calls] == [
+        ("engineer_1", "board_list_tickets", True),
+        ("engineer_1", "docs_write", False),
+        ("engineer_1", "board_get_ticket", False),
+    ]
+    assert calls[1].data["error"].startswith("Permission denied")
+    assert calls[1].data["args"] == {"slug": "prd", "title": "x", "content": "y"}
+    assert calls[2].data["args"] == "{bad json"
+    assert all(isinstance(e.data["duration_ms"], int) for e in calls)

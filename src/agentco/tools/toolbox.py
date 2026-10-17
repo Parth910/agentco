@@ -2,13 +2,14 @@
 executes the tool, and turns every failure into an error message the agent can learn from."""
 
 import json
+import time
 from typing import Any
 
 from pydantic import BaseModel, ValidationError
 
 from agentco.tools.base import Registry, ToolContext, ToolError, ToolResult
 from agentco.tools.permissions import is_allowed, tools_for_role
-from agentco.workspace.service import InvalidError, NotFoundError
+from agentco.workspace.service import InvalidError, NotFoundError, log_event
 
 
 def to_jsonable(value: Any) -> Any:
@@ -49,7 +50,31 @@ class ToolBox:
         return [self.registry.tools[name].schema() for name in self.names()]
 
     def call(self, name: str, arguments: str | dict | None = None) -> ToolResult:
-        """Run one tool call. Never raises: problems come back as ToolResult(ok=False)."""
+        """Run one tool call and log it as a "tool_called" event.
+        Never raises: problems come back as ToolResult(ok=False)."""
+        started = time.perf_counter()
+        result = self._run(name, arguments)
+        self._log(name, arguments, result, duration_ms=round((time.perf_counter() - started) * 1000))
+        return result
+
+    def _log(self, name: str, arguments: str | dict | None, result: ToolResult, duration_ms: int) -> None:
+        if isinstance(arguments, str):
+            try:
+                arguments = json.loads(arguments)
+            except json.JSONDecodeError:
+                pass  # keep the raw string so the bad input is visible in the log
+        session = self.ctx.session
+        try:
+            log_event(
+                session, self.ctx.project_id, self.ctx.actor, "tool_called",
+                tool=name, args=arguments or {}, ok=result.ok, error=result.error,
+                duration_ms=duration_ms,
+            )
+            session.commit()
+        except Exception:  # logging must never break the agent
+            session.rollback()
+
+    def _run(self, name: str, arguments: str | dict | None) -> ToolResult:
         tool = self.registry.get(name)
         if tool is None:
             available = ", ".join(self.names())
