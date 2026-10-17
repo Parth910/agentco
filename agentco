@@ -17,13 +17,13 @@ Commands:
   stop       Stop all services
   status     Show services, Ollama and LLM status
   logs       Follow service logs (Ctrl+C to exit)
+  launch     Launch a team on a product idea: ./agentco launch --idea "..."
   llm-test   Check the LLM works (chat + structured output)
   tools-demo Watch the LLM use workspace tools as different roles
   test       Run unit tests
   help       Show this help
 
 Coming later:
-  launch     Launch a team on a product idea   (M5)
   projects   List past runs                    (M10)
   resume     Continue a project                (M10)
   reset      Wipe all data                     (M10)
@@ -89,6 +89,12 @@ cmd_llm_test() {
   docker compose exec api python -m agentco.llm.smoke
 }
 
+cmd_launch() {
+  require_env
+  [ -n "$(docker compose ps -q api)" ] || { red "✘ Services not running. Start them with: make start"; exit 1; }
+  docker compose exec api python -m agentco.launch ${@+"$@"}
+}
+
 cmd_tools_demo() {
   require_env
   [ -n "$(docker compose ps -q api)" ] || { red "✘ Services not running. Start them with: make start"; exit 1; }
@@ -113,7 +119,7 @@ case "${1:-help}" in
   llm-test) cmd_llm_test ;;
   tools-demo) cmd_tools_demo ;;
   test)     shift; cmd_test "$@" ;;
-  launch)   not_yet launch M5 ;;
+  launch)   shift; cmd_launch ${@+"$@"} ;;
   projects) not_yet projects M10 ;;
   resume)   not_yet resume M10 ;;
   reset)    not_yet reset M10 ;;
