@@ -10,6 +10,7 @@ from agentco.workspace.models import (
     Doc,
     DocVersion,
     DocWrite,
+    Event,
     Message,
     MessageCreate,
     Project,
@@ -35,11 +36,41 @@ SLUG_PATTERN = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
 MENTION_PATTERN = re.compile(r"(?<![\w@])@([a-z0-9_]+)")
 
 
+# --- events ------------------------------------------------------------------
+
+def log_event(session: Session, project_id: int, actor: str, type: str, **data) -> Event:
+    """Add an event to the session; it is saved with the caller's next commit."""
+    event = Event(project_id=project_id, actor=actor, type=type, data=data)
+    session.add(event)
+    return event
+
+
+def list_events(
+    session: Session,
+    project_id: int,
+    actor: str | None = None,
+    type: str | None = None,
+    after_id: int = 0,
+    limit: int = 100,
+) -> list[Event]:
+    """Events oldest-first. With after_id: only newer ones. Without: the latest `limit`."""
+    get_project(session, project_id)
+    query = select(Event).where(Event.project_id == project_id, Event.id > after_id)
+    if actor:
+        query = query.where(Event.actor == actor)
+    if type:
+        query = query.where(Event.type == type)
+    events = list(session.exec(query.order_by(Event.id)))
+    return events[:limit] if after_id else events[-limit:]
+
+
 # --- projects ----------------------------------------------------------------
 
 def create_project(session: Session, data: ProjectCreate) -> Project:
     project = Project.model_validate(data)
     session.add(project)
+    session.flush()
+    log_event(session, project.id, "ceo", "project_created", name=project.name)
     session.commit()
     session.refresh(project)
     return project
@@ -65,6 +96,10 @@ def create_ticket(session: Session, project_id: int, data: TicketCreate) -> Tick
     ).one()
     ticket = Ticket.model_validate(data, update={"project_id": project_id, "number": (last or 0) + 1})
     session.add(ticket)
+    log_event(
+        session, project_id, data.created_by, "ticket_created",
+        number=ticket.number, title=ticket.title, assignee=ticket.assignee,
+    )
     session.commit()
     session.refresh(ticket)
     return ticket
@@ -94,15 +129,18 @@ def get_ticket(session: Session, project_id: int, number: int) -> Ticket:
     return ticket
 
 
-def update_ticket(session: Session, project_id: int, number: int, data: TicketUpdate) -> Ticket:
+def update_ticket(
+    session: Session, project_id: int, number: int, data: TicketUpdate, actor: str = "ceo"
+) -> Ticket:
     ticket = get_ticket(session, project_id, number)
-    changes = data.model_dump(exclude_unset=True)
+    changes = data.model_dump(mode="json", exclude_unset=True)
     # Only assignee may be cleared with null; ignore null for required fields.
     changes = {k: v for k, v in changes.items() if v is not None or k == "assignee"}
     if changes:
         ticket.sqlmodel_update(changes)
         ticket.updated_at = utcnow()
         session.add(ticket)
+        log_event(session, project_id, actor, "ticket_updated", number=number, changes=changes)
         session.commit()
         session.refresh(ticket)
     return ticket
@@ -112,6 +150,7 @@ def add_comment(session: Session, project_id: int, number: int, data: CommentCre
     ticket = get_ticket(session, project_id, number)
     comment = Comment.model_validate(data, update={"ticket_id": ticket.id})
     session.add(comment)
+    log_event(session, project_id, data.author, "comment_added", number=number)
     session.commit()
     session.refresh(comment)
     return comment
@@ -143,6 +182,7 @@ def write_doc(session: Session, project_id: int, slug: str, data: DocWrite) -> D
     session.add(doc)
     session.flush()  # assigns doc.id for a new doc
     session.add(DocVersion.model_validate(data, update={"doc_id": doc.id, "version": doc.version}))
+    log_event(session, project_id, data.author, "doc_written", slug=slug, version=doc.version)
     session.commit()
     session.refresh(doc)
     return doc
@@ -193,6 +233,11 @@ def post_message(session: Session, project_id: int, channel: str, data: MessageC
         update={"project_id": project_id, "channel": channel, "mentions": parse_mentions(data.body)},
     )
     session.add(message)
+    session.flush()
+    log_event(
+        session, project_id, data.author, "message_posted",
+        channel=channel, message_id=message.id, mentions=message.mentions,
+    )
     session.commit()
     session.refresh(message)
     return message

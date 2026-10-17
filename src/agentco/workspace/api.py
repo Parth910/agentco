@@ -2,7 +2,7 @@
 
 from collections.abc import Iterator
 
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Depends, Header, Query, Request
 from sqlmodel import Session
 
 from agentco.workspace import service
@@ -12,6 +12,7 @@ from agentco.workspace.models import (
     Doc,
     DocVersion,
     DocWrite,
+    Event,
     Message,
     MessageCreate,
     Project,
@@ -74,9 +75,13 @@ def get_ticket(project_id: int, number: int, session: Session = SessionDep) -> T
 
 @router.patch("/{project_id}/tickets/{number}", tags=["board"])
 def update_ticket(
-    project_id: int, number: int, data: TicketUpdate, session: Session = SessionDep
+    project_id: int,
+    number: int,
+    data: TicketUpdate,
+    x_actor: str = Header(default="ceo", description="Who is making the change"),
+    session: Session = SessionDep,
 ) -> Ticket:
-    return service.update_ticket(session, project_id, number, data)
+    return service.update_ticket(session, project_id, number, data, actor=x_actor)
 
 
 @router.post("/{project_id}/tickets/{number}/comments", status_code=201, tags=["board"])
@@ -157,3 +162,18 @@ def list_messages(
 ) -> list[Message]:
     """Messages across all channels; use ?mention=pm for a role's inbox."""
     return service.list_messages(session, project_id, mention=mention, after_id=after_id, limit=limit)
+
+
+# --- events ------------------------------------------------------------------
+
+@router.get("/{project_id}/events", tags=["events"])
+def list_events(
+    project_id: int,
+    actor: str | None = None,
+    type: str | None = None,
+    after_id: int = 0,
+    limit: int = Query(default=100, ge=1, le=1000),
+    session: Session = SessionDep,
+) -> list[Event]:
+    """The team timeline: every change, who made it, and (from agents) every tool call."""
+    return service.list_events(session, project_id, actor, type, after_id, limit)

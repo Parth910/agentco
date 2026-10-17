@@ -113,3 +113,16 @@ class Message(MessageCreate, table=True):
     channel: str = Field(index=True)  # e.g. "general", "eng"
     mentions: list[str] = Field(default_factory=list, sa_column=Column(JSON))
     created_at: datetime = Field(default_factory=utcnow)
+
+
+# --- events ------------------------------------------------------------------
+
+class Event(SQLModel, table=True):
+    """Something that happened in the workspace, and who did it. The team timeline."""
+
+    id: int | None = Field(default=None, primary_key=True)
+    project_id: int = Field(foreign_key="project.id", index=True)
+    actor: str = Field(index=True)  # "ceo" or a role id like "engineer_1"
+    type: str = Field(index=True)  # e.g. "ticket_created", "tool_called"
+    data: dict = Field(default_factory=dict, sa_column=Column(JSON))
+    created_at: datetime = Field(default_factory=utcnow)
