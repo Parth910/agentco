@@ -18,6 +18,7 @@ Commands:
   status     Show services, Ollama and LLM status
   logs       Follow service logs (Ctrl+C to exit)
   llm-test   Check the LLM works (chat + structured output)
+  tools-demo Watch the LLM use workspace tools as different roles
   test       Run unit tests
   help       Show this help
 
@@ -88,6 +89,12 @@ cmd_llm_test() {
   docker compose exec api python -m agentco.llm.smoke
 }
 
+cmd_tools_demo() {
+  require_env
+  [ -n "$(docker compose ps -q api)" ] || { red "✘ Services not running. Start them with: make start"; exit 1; }
+  docker compose exec api python -m agentco.tools.demo
+}
+
 cmd_test() {
   require_env
   docker compose run --rm --build -v "$PWD/tests:/app/tests" api pytest -q ${@+"$@"}
@@ -104,6 +111,7 @@ case "${1:-help}" in
   status)   cmd_status ;;
   logs)     cmd_logs ;;
   llm-test) cmd_llm_test ;;
+  tools-demo) cmd_tools_demo ;;
   test)     shift; cmd_test "$@" ;;
   launch)   not_yet launch M5 ;;
   projects) not_yet projects M10 ;;

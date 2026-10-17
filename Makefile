@@ -2,7 +2,7 @@
 # Run `make` or `make help` to see all targets.
 
 .DEFAULT_GOAL := help
-.PHONY: help setup start stop restart status logs llm-test test
+.PHONY: help setup start stop restart status logs llm-test tools-demo test
 
 # Optional: make setup MODEL=qwen2.5:3b YES=1
 SETUP_ARGS := $(if $(MODEL),--model $(MODEL)) $(if $(YES),--yes)
@@ -37,6 +37,9 @@ logs: ## Follow service logs (Ctrl+C to exit)
 
 llm-test: ## Check the LLM works (chat + structured output)
 	@./agentco llm-test
+
+tools-demo: ## Watch the LLM use workspace tools as different roles
+	@./agentco tools-demo
 
 test: ## Run unit tests (in Docker, no local Python needed)
 	@./agentco test
