@@ -2,7 +2,7 @@
 
 import re
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Generic, TypeVar
 
 from openai import OpenAI
@@ -10,12 +10,19 @@ from pydantic import BaseModel, ValidationError
 
 from agentco.llm.config import LLMConfig
 
-Messages = list[dict[str, str]]
+Messages = list[dict]
 T = TypeVar("T", bound=BaseModel)
 
 
 class StructuredOutputError(Exception):
     """The model did not return valid JSON for the schema after all retries."""
+
+
+@dataclass
+class ToolCall:
+    id: str
+    name: str
+    arguments: str  # JSON string, exactly as the model wrote it
 
 
 @dataclass
@@ -25,6 +32,17 @@ class LLMResponse:
     prompt_tokens: int
     completion_tokens: int
     latency_s: float
+    tool_calls: list[ToolCall] = field(default_factory=list)
+
+    def assistant_message(self) -> dict:
+        """This reply as a chat message, to append to the conversation history."""
+        message: dict = {"role": "assistant", "content": self.text}
+        if self.tool_calls:
+            message["tool_calls"] = [
+                {"id": c.id, "type": "function", "function": {"name": c.name, "arguments": c.arguments}}
+                for c in self.tool_calls
+            ]
+        return message
 
 
 @dataclass
@@ -65,8 +83,17 @@ class LLMClient:
             options["reasoning_effort"] = self.config.reasoning_effort
         return options
 
-    def chat(self, prompt: str | Messages, system: str | None = None, **options) -> LLMResponse:
-        """Send messages, return the assistant's reply with token usage and latency."""
+    def chat(
+        self,
+        prompt: str | Messages,
+        system: str | None = None,
+        tools: list[dict] | None = None,
+        **options,
+    ) -> LLMResponse:
+        """Send messages, return the assistant's reply with token usage and latency.
+        With `tools` (OpenAI function schemas), the reply may contain tool_calls."""
+        if tools:
+            options["tools"] = tools
         started = time.perf_counter()
         completion = self._openai.chat.completions.create(
             messages=build_messages(prompt, system),
@@ -75,12 +102,17 @@ class LLMClient:
         latency = time.perf_counter() - started
 
         usage = completion.usage
+        message = completion.choices[0].message
         return LLMResponse(
-            text=completion.choices[0].message.content or "",
+            text=message.content or "",
             model=completion.model,
             prompt_tokens=usage.prompt_tokens if usage else 0,
             completion_tokens=usage.completion_tokens if usage else 0,
             latency_s=round(latency, 3),
+            tool_calls=[
+                ToolCall(id=c.id, name=c.function.name, arguments=c.function.arguments)
+                for c in message.tool_calls or []
+            ],
         )
 
     def structured(

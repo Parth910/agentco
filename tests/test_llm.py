@@ -16,9 +16,10 @@ class Idea(BaseModel):
 
 
 class FakeLLM:
-    """Returns the given replies in order and records every request body."""
+    """Returns the given replies in order and records every request body.
+    A reply is text, or a dict message (e.g. with tool_calls)."""
 
-    def __init__(self, *replies: str):
+    def __init__(self, *replies):
         self.replies = list(replies)
         self.requests: list[dict] = []
 
@@ -35,12 +36,16 @@ class FakeLLM:
                     {
                         "index": 0,
                         "finish_reason": "stop",
-                        "message": {"role": "assistant", "content": self.replies.pop(0)},
+                        "message": self._message(self.replies.pop(0)),
                     }
                 ],
                 "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
             },
         )
+
+    @staticmethod
+    def _message(reply) -> dict:
+        return reply if isinstance(reply, dict) else {"role": "assistant", "content": reply}
 
     def client(self, **config) -> LLMClient:
         cfg = LLMConfig(base_url="http://fake/v1", model="fake-model", **config)
@@ -119,3 +124,23 @@ def test_structured_gives_up_after_max_retries():
 def test_extract_json_strips_code_fences():
     assert extract_json('```json\n{"a": 1}\n```') == '{"a": 1}'
     assert extract_json('  {"a": 1} ') == '{"a": 1}'
+
+
+# --- tool calls --------------------------------------------------------------
+
+def test_chat_returns_tool_calls():
+    call = {"id": "call_1", "type": "function", "function": {"name": "chat_post", "arguments": '{"channel": "eng"}'}}
+    fake = FakeLLM({"role": "assistant", "content": None, "tool_calls": [call]})
+    tools = [{"type": "function", "function": {"name": "chat_post", "parameters": {"type": "object"}}}]
+
+    r = fake.client().chat("post it", tools=tools)
+
+    assert fake.requests[0]["tools"] == tools
+    assert [(c.id, c.name, c.arguments) for c in r.tool_calls] == [("call_1", "chat_post", '{"channel": "eng"}')]
+    assert r.assistant_message() == {"role": "assistant", "content": "", "tool_calls": [call]}
+
+
+def test_plain_reply_has_no_tool_calls():
+    r = FakeLLM("hi").client().chat("hello")
+    assert r.tool_calls == []
+    assert r.assistant_message() == {"role": "assistant", "content": "hi"}
