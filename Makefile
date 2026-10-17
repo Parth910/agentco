@@ -2,7 +2,7 @@
 # Run `make` or `make help` to see all targets.
 
 .DEFAULT_GOAL := help
-.PHONY: help setup start stop restart status logs llm-test tools-demo test
+.PHONY: help setup start stop restart status logs launch llm-test tools-demo test
 
 # Optional: make setup MODEL=qwen2.5:3b CONTEXT=8192 YES=1
 SETUP_ARGS := $(if $(MODEL),--model $(MODEL)) $(if $(CONTEXT),--context $(CONTEXT)) $(if $(YES),--yes)
@@ -35,6 +35,10 @@ status: ## Show services, Ollama and LLM status
 
 logs: ## Follow service logs (Ctrl+C to exit)
 	@./agentco logs
+
+launch: ## Launch the team on an idea: make launch IDEA="..."
+	@[ -n "$(IDEA)" ] || { echo 'Usage: make launch IDEA="A social feed for college students"'; exit 1; }
+	@./agentco launch --idea "$(IDEA)"
 
 llm-test: ## Check the LLM works (chat + structured output)
 	@./agentco llm-test
