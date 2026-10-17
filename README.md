@@ -7,10 +7,11 @@ engineers, QA, …), and watch them research, write a PRD, plan tickets, write c
 test it — all through an internal workspace (task board, docs, chat, git repo) that
 runs on your own machine. Every step is observable.
 
-> **Status: early development (M3).** This README describes the target experience.
-> Today: `make setup` prepares your machine, `make llm-test` runs a real call against
-> your local model, and the [workspace API](#workspace-api) (board, docs, chat) is live
-> at http://localhost:8000/docs. Agents arrive in M5. See the [Roadmap](#roadmap).
+> **Status: early development (M4).** This README describes the target experience.
+> Today: `make setup` prepares your machine, the [workspace API](#workspace-api) (board,
+> docs, chat, events) is live at http://localhost:8000/docs, and `make tools-demo` shows
+> your local model using [agent tools](#agent-tools) as different roles. Full agents
+> arrive in M5. See the [Roadmap](#roadmap).
 
 This is a learning project for core agentic AI concepts: agent loops, tool calling,
 multi-agent coordination, role permissions, shared state, human-in-the-loop and
@@ -161,6 +162,7 @@ make restart             # restart services
 make status              # what's running, is the LLM reachable
 make logs                # follow logs
 make llm-test            # check the LLM works (chat + structured JSON)
+make tools-demo          # watch the LLM use workspace tools as different roles
 make test                # run unit tests (in Docker)
 ```
 
@@ -199,6 +201,7 @@ Interactive docs: **http://localhost:8000/docs**
 | Board | `POST/GET /projects/{id}/tickets` (filter `?status=` `?assignee=`) · `GET/PATCH …/tickets/{n}` · `POST/GET …/tickets/{n}/comments` |
 | Docs | `PUT /projects/{id}/docs/{slug}` (create or new version) · `GET …/docs` · `GET …/docs/{slug}` · `GET …/docs/{slug}/versions[/{v}]` |
 | Chat | `POST/GET /projects/{id}/channels/{channel}/messages` · `GET …/channels` · `GET /projects/{id}/messages?mention=qa` (a role's inbox) |
+| Events | `GET /projects/{id}/events` (filter `?actor=` `?type=`, poll with `?after_id=`): the team timeline |
 
 ```bash
 # create a project, a ticket, and move it
@@ -215,6 +218,52 @@ curl -X POST localhost:8000/projects/1/channels/eng/messages -H 'content-type: a
 ```
 
 Ticket statuses: `todo → in_progress → review → done`. Priority: 1 (highest) to 3.
+Send an `X-Actor: <role>` header with `PATCH` to record who made the change (default `ceo`).
+
+---
+
+## Agent tools
+
+Agents act on the workspace only through **tools**: Python functions whose docstring and
+Pydantic argument model become the JSON schema the LLM sees.
+
+| Area | Tools |
+|---|---|
+| Board | `board_list_tickets` · `board_get_ticket` · `board_create_ticket` · `board_update_ticket` · `board_comment` |
+| Docs | `docs_list` · `docs_read` · `docs_write` |
+| Chat | `chat_post` · `chat_read` · `chat_inbox` (messages that @mention you) |
+
+**Permissions.** Each role gets tool patterns (wildcards allowed). An agent only *sees*
+its allowed tools; calling another returns "permission denied".
+
+| Role | Tools |
+|---|---|
+| `pm` | `board_*`, `docs_*`, `chat_*` |
+| `program_manager` | `board_*`, read docs, `chat_*` |
+| `researcher` | read board, `docs_*`, `chat_*` |
+| `engineer_N`, `qa` | read/update/comment tickets, read docs, `chat_*` (can't create tickets or write docs) |
+
+**Built for small models:**
+- Tools act as the calling role: an agent can't post or comment as someone else.
+- Small mistakes are accepted: `"#eng"` → `eng`, `"Tech Design"` → `tech-design`, assignee `"me"`.
+- Errors explain the fix: `Doc 'roadmap' not found. Available docs: prd, research`.
+- Bad calls never crash an agent; they come back as an error it can react to.
+
+**Everything is logged.** Each workspace change (`ticket_created`, `doc_written`, …) and
+each tool call (`tool_called` with args, result, duration — including denied and failed
+calls) is an event in `GET /projects/{id}/events`.
+
+```
+$ make tools-demo
+[pm] Create a priority 1 ticket assigned to engineer_1 to build the API for creating posts.
+  🔧 board_create_ticket({"priority":1,"assignee":"engineer_1","title":"Build the API for creating posts"…)
+  ✔ {"number": 1, "title": "Build the API for creating posts", "status": "todo", …}
+[engineer_1] Write the PRD document for the product.
+  💬 I cannot write the PRD document for you. …
+[pm] Read the PRD document.
+  🔧 docs_read({"slug":"prd"})
+  ✘ Doc 'prd' not found. Available docs: none, no documents exist yet
+```
 
 ---
 
@@ -240,11 +289,11 @@ agentco/
 ├── src/agentco/        # Python package
 │   ├── llm/            # OpenAI-compatible LLM client
 │   ├── workspace/      # Board, docs, chat: models, service (logic), api (HTTP)
-│   ├── tools/          # Workspace APIs exposed as agent tools + permissions
+│   ├── tools/          # Tool framework, workspace tools, role permissions
 │   ├── agents/         # Agent loop and roles
 │   ├── orchestrator/   # Team workflow (LangGraph)
 │   ├── control/        # Runtime control API
-│   └── observability/  # Event log, tracing
+│   └── observability/  # Tracing (event log lives in workspace/)
 ├── dashboard/          # Web UI
 ├── teams/              # Team templates (YAML)
 ├── projects/           # Run output (git-ignored)
@@ -262,7 +311,7 @@ agentco/
 | M1 | Setup & infra | `make setup` gets a machine ready | ✅ |
 | M2 | LLM client | Talks to Ollama or any OpenAI-compatible API | ✅ |
 | M3 | Workspace | Board, docs, chat APIs — **v0.1.0** | ✅ |
-| M4 | Tools & permissions | Agents can use workspace tools, scoped by role | ⬜ |
+| M4 | Tools & permissions | Agents can use workspace tools, scoped by role | ✅ |
 | M5 | First agent (PM) | Idea → PRD + tickets — **v0.2.0** | ⬜ |
 | M6 | Team workflow | PM → Engineer → QA end to end — **v0.3.0** | ⬜ |
 | M7 | Observability | Langfuse traces, run reports | ⬜ |
