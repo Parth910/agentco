@@ -1,6 +1,6 @@
 [project]
 name = "agentco"
-version = "0.0.1"
+version = "0.2.0"
 description = "A local team of AI agents that works like a small product company."
 readme = "README.md"
 license = { text = "MIT" }
