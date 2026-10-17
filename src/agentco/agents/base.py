@@ -3,6 +3,9 @@
 Ask the LLM; if it calls tools, run them and add the results to the conversation;
 repeat. The agent is done when it replies without calling a tool. A step limit
 guarantees it can never loop forever.
+
+Each run is logged as events: agent_started, agent_message, agent_finished
+(tool calls are logged by the ToolBox as tool_called).
 """
 
 import time
@@ -11,6 +14,7 @@ from dataclasses import dataclass, field
 
 from agentco.llm import LLMClient
 from agentco.tools.toolbox import ToolBox
+from agentco.workspace.service import log_event
 
 # on_event(kind, data): lets a caller show progress, e.g. ("tool", {...}).
 EventCallback = Callable[[str, dict], None]
@@ -53,6 +57,7 @@ class Agent:
             {"role": "user", "content": task},
         ]
         run = AgentRun(role=self.role, final_text="", stop_reason="max_steps", messages=messages)
+        self._log("agent_started", task=task, max_steps=self.max_steps)
 
         while run.steps < self.max_steps:
             run.steps += 1
@@ -69,6 +74,7 @@ class Agent:
             messages.append(reply.assistant_message())
             if reply.text.strip():
                 self.on_event("message", {"step": run.steps, "text": reply.text.strip()})
+                self._log("agent_message", step=run.steps, text=reply.text.strip())
 
             if not reply.tool_calls:
                 run.stop_reason = "done"
@@ -93,4 +99,22 @@ class Agent:
                 )
 
         run.duration_s = round(time.perf_counter() - started, 2)
+        self._log(
+            "agent_finished",
+            stop_reason=run.stop_reason,
+            steps=run.steps,
+            tool_calls=run.tool_calls,
+            prompt_tokens=run.prompt_tokens,
+            completion_tokens=run.completion_tokens,
+            duration_s=run.duration_s,
+            final_text=run.final_text[:1000],
+        )
         return run
+
+    def _log(self, type: str, **data) -> None:
+        ctx = self.toolbox.ctx
+        try:
+            log_event(ctx.session, ctx.project_id, self.role, type, **data)
+            ctx.session.commit()
+        except Exception:  # logging must never break the agent
+            ctx.session.rollback()

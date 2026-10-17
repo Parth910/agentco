@@ -68,3 +68,15 @@ def test_progress_events(make_agent):
     llm = ScriptedLLM(tool_call("board_list_tickets"), "Board is empty.")
     make_agent(llm, on_event=lambda kind, data: seen.append(kind)).run("Check the board")
     assert seen == ["tool", "message"]
+
+
+def test_run_is_logged_as_events(make_agent, session):
+    llm = ScriptedLLM(tool_call("board_list_tickets"), "Board is empty.")
+    make_agent(llm).run("Check the board")
+
+    events = [e for e in service.list_events(session, make_agent.project_id) if e.actor == "pm"]
+    assert [e.type for e in events] == ["agent_started", "tool_called", "agent_message", "agent_finished"]
+    assert events[0].data["task"] == "Check the board"
+    finished = events[-1].data
+    assert (finished["stop_reason"], finished["steps"], finished["tool_calls"]) == ("done", 2, 1)
+    assert finished["final_text"] == "Board is empty."
